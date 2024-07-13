@@ -15,9 +15,9 @@
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 
 static sbuf_t sbuf; /* Shared buffer of connected descriptors */
-static cache_t cache;
+static cache_t cache; 
 static int cacheSize; /* gloabl variable to check the cache size */
-static int readcnt;
+static int readcnt; /* the number of reader */
 static sem_t mutex, W;
 
 void* thread(void* vargp);
@@ -34,6 +34,9 @@ obj_t* readItem(char* , int );
 void handleRequest(int fd){
     /* the argument used to parse the first line of http request */
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], fileName[MAXLINE];
+    /*
+        buf: client request message
+    */
 
     /* client request header and body */
     char clientRequest[MAXLINE];
@@ -89,9 +92,10 @@ void handleRequest(int fd){
     char hostName[100];
     char* colon = strstr(host, ":");
     strncpy(hostName, host, colon - host);
-    int clientfd = Open_clientfd(hostName, port);
-
-    Rio_readinitb(&rioTiny, clientfd);
+    /* connect to the server */
+    int serverfd = Open_clientfd(hostName, port);
+    Rio_readinitb(&rioTiny, serverfd);
+    /* send the client request to the server */
     Rio_writen(rioTiny.rio_fd, clientRequest, strlen(clientRequest));
 
     /** step4: read the response from tiny and send it to the client */
@@ -100,14 +104,15 @@ void handleRequest(int fd){
     // while( (n = Rio_readlineb(&rioTiny, tinyResponse, MAXLINE)) != 0){
     //     Rio_writen(fd, tinyResponse, n);
     // }
+    /* read the respond from server and send to the client */
     readAndWriteResponse(fd, &rioTiny, uri);
 }
 
-void readAndWriteResponse(int fd, rio_t* rioTiny, char* uri){
+void readAndWriteResponse(int clientfd, rio_t* rioTiny, char* uri){
     char tinyResponse[MAXLINE];
     int n, totalBytes = 0;
     //new response
-    obj_t* obj = Malloc(sizeof(*obj));
+    obj_t* obj = Malloc(sizeof(*obj));  // cache object
     obj->flag = '0';
     strcpy(obj->uri, uri);
     *obj->respHeader = 0;
@@ -115,8 +120,9 @@ void readAndWriteResponse(int fd, rio_t* rioTiny, char* uri){
 
     printf("obj->url == %s\n", obj->uri);
 
+    /* get the http respond head */
     while( (n = rio_readlineb(rioTiny, tinyResponse, MAXLINE)) != 0){
-        Rio_writen(fd, tinyResponse, n);
+        Rio_writen(clientfd, tinyResponse, n);
 
         if(strcmp(tinyResponse, "\r\n") == 0) // prepare for body part
             break;
@@ -128,19 +134,21 @@ void readAndWriteResponse(int fd, rio_t* rioTiny, char* uri){
     obj->respHeaderLen = totalBytes;
     totalBytes = 0;
 
+    /* get the http respond body */
     while( (n = rio_readlineb(rioTiny, tinyResponse, MAXLINE)) != 0){
-        Rio_writen(fd, tinyResponse, n);
+        Rio_writen(clientfd, tinyResponse, n);
         totalBytes += n;
         strcat(obj->respBody, tinyResponse);
     }
 
     obj->respBodyLen = totalBytes;
+
+    /* try to cache this respond <uri, http_respond> */
     //check if the cache is too large
     if(totalBytes >= MAX_OBJECT_SIZE){
         Free(obj);
         return;
     }
-
     printf("In reading Responsse, we have cache the follwing item\n");
     printf("======= response header ========\n");
     printf("%s", obj->respHeader);
