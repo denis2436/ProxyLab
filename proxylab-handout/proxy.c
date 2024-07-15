@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "csapp.h"
 #include "sbuf.h"
 #include "cache.h"
@@ -296,10 +297,8 @@ obj_t* readItem(char* targetURI, int clientfd){
         if(strcmp(targetURI, cur->uri) == 0){
             return cur;
         }
-
         cur = cur->next;
     }
-
 
     /***** reading section ends *****/
     P(&mutex);
